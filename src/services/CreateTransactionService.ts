@@ -1,7 +1,7 @@
-// import AppError from '../errors/AppError';
-
-import { getRepository } from 'typeorm';
+import { getCustomRepository } from 'typeorm';
+import AppError from '../errors/AppError';
 import Transaction from '../models/Transaction';
+import TransactionsRepository from '../repositories/TransactionsRepository';
 import CreateCategoryService from './CreateCategoryService';
 
 interface CreateTransactionDTO {
@@ -18,8 +18,23 @@ class CreateTransactionService {
     value,
     categoryTitle,
   }: CreateTransactionDTO): Promise<Transaction> {
-    const repository = getRepository(Transaction);
+    const repository = getCustomRepository(TransactionsRepository);
 
+    if (!['income', 'outcome'].includes(type)) {
+      throw new AppError("Transaction type must be 'income' or 'outcome'", 400);
+    }
+    const { total } = await repository.getBalance();
+
+    if (type === 'outcome' && total < value) {
+      throw new AppError("You don't have enough balance", 400);
+    }
+
+    if (!categoryTitle) {
+      throw new AppError(
+        'Category title is required to create new transaction',
+        400,
+      );
+    }
     const createCategory = new CreateCategoryService();
     const category = await createCategory.execute({ title: categoryTitle });
 
