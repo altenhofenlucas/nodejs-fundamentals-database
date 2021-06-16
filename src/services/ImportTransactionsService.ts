@@ -4,7 +4,7 @@ import { getRepository, In } from 'typeorm';
 import Category from '../models/Category';
 import Transaction from '../models/Transaction';
 
-interface CSVTransactionDTO {
+interface TransactionsToSaveDTO {
   title: string;
   type: 'income' | 'outcome';
   value: number;
@@ -12,11 +12,11 @@ interface CSVTransactionDTO {
 }
 
 interface SaveTransactionsDTO {
-  transactions: CSVTransactionDTO[];
+  transactions: TransactionsToSaveDTO[];
   categories: Category[];
 }
 
-async function saveCategories(categories: string[]): Promise<Category[]> {
+async function _saveCategories(categories: string[]): Promise<Category[]> {
   const categoriesRepository = getRepository(Category);
 
   const existentCategories = await categoriesRepository.find({
@@ -25,14 +25,16 @@ async function saveCategories(categories: string[]): Promise<Category[]> {
     },
   });
 
-  const categoriesTitles = existentCategories.map(category => category.title);
+  const existentCategoriesTitles = existentCategories.map(
+    category => category.title,
+  );
 
-  const addCategoriesTitles = categories
-    .filter(category => !categoriesTitles.includes(category))
+  const newCategoriesTitles = categories
+    .filter(category => !existentCategoriesTitles.includes(category))
     .filter((value, index, self) => self.indexOf(value) === index);
 
   const newCategories = categoriesRepository.create(
-    addCategoriesTitles.map(title => ({ title })),
+    newCategoriesTitles.map(title => ({ title })),
   );
 
   await categoriesRepository.save(newCategories);
@@ -40,11 +42,12 @@ async function saveCategories(categories: string[]): Promise<Category[]> {
   return [...newCategories, ...existentCategories];
 }
 
-async function saveTransactions({
+async function _saveTransactions({
   transactions,
   categories,
 }: SaveTransactionsDTO): Promise<Transaction[]> {
   const transactionsRepository = getRepository(Transaction);
+
   const createdTransactions = transactionsRepository.create(
     transactions.map(transaction => ({
       title: transaction.title,
@@ -73,7 +76,7 @@ class ImportTransactionsService {
 
     const parseCSV = readCSVStream.pipe(parseStream);
 
-    const transactions: CSVTransactionDTO[] = [];
+    const transactionsToSave: TransactionsToSaveDTO[] = [];
     const categoriesToSave: string[] = [];
 
     parseCSV.on('data', async line => {
@@ -81,21 +84,22 @@ class ImportTransactionsService {
 
       if (!title || !type || !value || !category) return;
 
-      transactions.push({ title, type, value, category });
+      transactionsToSave.push({ title, type, value, category });
       categoriesToSave.push(category);
     });
 
     await new Promise(resolve => parseCSV.on('end', resolve));
 
-    const categories = await saveCategories(categoriesToSave);
-    const createdTransactions = await saveTransactions({
-      transactions,
+    const categories = await _saveCategories(categoriesToSave);
+
+    const transactions = await _saveTransactions({
+      transactions: transactionsToSave,
       categories,
     });
 
     await fs.promises.unlink(filePath);
 
-    return createdTransactions;
+    return transactions;
   }
 }
 
